@@ -1,21 +1,19 @@
-*.DS_Store
-.classpath
-.project
-.settings
-bin/
+# Secrets
+.env
+
+# Database volume
+dbdata/
+
+# Backups
+backups/
+
+# Maven build output
 target/
-dist/
-logs/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-hs_err_pid*
-nomad.properties
-src/main/java/topsecret/
-/dlc.bak
-/dlc.bak.bak
+*.jar
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,108 @@
+version: "3.9"
+
+# =============================================================================
+# NetworkMemories — Metal Gear Online 2 (nomad-docker)
+# Usage:
+#   make init        → first-time setup
+#   make run-daemon  → start all services in background
+#
+# ⚠️  RPCS3 NOTE: DNS redirect alone does NOT redirect RPCS3 clients.
+#     The SaveMGO plugin.sprx hardcodes its server address.
+#     Patching plugin.sprx is in progress — see docs/rpcs3-plugin-blocker.md
+#     Real PS3 hardware: works fully with DNS redirect.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # DATABASE
+  # ---------------------------------------------------------------------------
+  nomad-mysql:
+    image: mysql:8.0
+    container_name: nomad-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-nomad}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - ./dbdata:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # DNS — resolves MGO2 domains → SERVER_IP
+  # ⚠️  Works for real PS3 only. RPCS3 needs patched plugin.sprx
+  # ---------------------------------------------------------------------------
+  nomad-dns:
+    build:
+      context: ./docker/dnsmasq
+    container_name: nomad-dns
+    restart: unless-stopped
+    environment:
+      SERVER_IP: ${SERVER_IP}
+    ports:
+      - "${DNS_PORT:-53}:53/udp"
+      - "${DNS_PORT:-53}:53/tcp"
+    cap_add:
+      - NET_BIND_SERVICE
+
+  # ---------------------------------------------------------------------------
+  # WEB API + ADMIN PANEL (PHP + Apache)
+  # ---------------------------------------------------------------------------
+  nomad-web:
+    build:
+      context: ./docker/gateway
+    container_name: nomad-web
+    restart: unless-stopped
+    environment:
+      SERVER_IP: ${SERVER_IP}
+      MYSQL_HOST: nomad-mysql
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-nomad}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_SECRET: ${ADMIN_SECRET}
+    ports:
+      - "${WEB_API_PORT:-80}:80"
+      - "${WEB_API_PORT_SSL:-443}:443"
+    depends_on:
+      nomad-mysql:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # NOMAD JAVA SERVER (Netty NIO)
+  # ---------------------------------------------------------------------------
+  nomad-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nomad-server
+    restart: unless-stopped
+    environment:
+      SERVER_IP: ${SERVER_IP}
+      WEB_API_INTERNAL_URL: http://nomad-web/api
+      MGO2_PORT_MAIN: ${MGO2_PORT_MAIN:-10020}
+      MGO2_PORT_GAME: ${MGO2_PORT_GAME:-10100}
+      MGO2_PORT_RELAY1: ${MGO2_PORT_RELAY1:-10200}
+      MGO2_PORT_RELAY2: ${MGO2_PORT_RELAY2:-10201}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${MGO2_PORT_MAIN:-10020}:10020"
+      - "${MGO2_PORT_GAME:-10100}:10100"
+      - "${MGO2_PORT_RELAY1:-10200}:10200"
+      - "${MGO2_PORT_RELAY2:-10201}:10201"
+    depends_on:
+      nomad-mysql:
+        condition: service_healthy
+      nomad-web:
+        condition: service_started
